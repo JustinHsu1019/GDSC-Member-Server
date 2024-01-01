@@ -9,6 +9,7 @@ import jwt
 from jwt import PyJWKClient
 from functools import wraps
 import git
+import requests
 
 app = Flask(__name__)
 CORS(app)
@@ -33,10 +34,12 @@ def serialize_doc(doc):
         return doc
 
 def decode_id_token(id_token):
-    jwks_client = PyJWKClient("https://www.googleapis.com/oauth2/v3/certs")
-    signing_key = jwks_client.get_signing_key_from_jwt(id_token)
-    decoded_token = jwt.decode(id_token, signing_key.key, algorithms=["RS256"], audience='162429496765-ortobcqq28giqurc67ls7adv5ekft7mv.apps.googleusercontent.com')
-    return decoded_token
+    url = f"https://www.googleapis.com/oauth2/v3/tokeninfo?id_token={id_token}"
+    response = requests.get(url)
+    if response.status_code == 200:
+        return response.json()
+    else:
+        return {"error": "Unable to validate token", "status_code": response.status_code}
 
 def jwt_required_custom(fn):
     @wraps(fn)
@@ -70,7 +73,7 @@ def custom_google_login():
     id_token = request.json.get('idToken')
     try:
         decoded_token = decode_id_token(id_token)
-        if decoded_token:
+        if decoded_token.get('email_verified') == 'true':
             user_email = decoded_token.get('email')
             user_name = decoded_token.get('name')
             user_picture = decoded_token.get('picture')

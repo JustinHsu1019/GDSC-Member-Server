@@ -6,15 +6,16 @@ from google.cloud.firestore_v1.document import DocumentReference
 from flask_cors import CORS
 from config import JWT_SECRET_KEY
 import jwt
-from jwt import PyJWKClient
 from functools import wraps
 import git
 import requests
+from datetime import timedelta
 
 app = Flask(__name__)
 CORS(app)
 
 app.config['JWT_SECRET_KEY'] = JWT_SECRET_KEY
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(hours=24)
 jwt_code = JWTManager(app)
 
 cred = credentials.Certificate('/home/gdscmemberweb/member-server/Service/server.json')

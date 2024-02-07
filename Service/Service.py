@@ -1,15 +1,15 @@
+from flask_cors import CORS
 from flask import Flask, request, jsonify
 from flask_jwt_extended import JWTManager, create_access_token
+
 import firebase_admin
 from firebase_admin import credentials, firestore
 from google.cloud.firestore_v1.document import DocumentReference
-from flask_cors import CORS
-from config import JWT_SECRET_KEY
-import jwt
+
+import jwt, git, requests
 from functools import wraps
-import git
-import requests
 from datetime import timedelta
+from config import JWT_SECRET_KEY
 
 app = Flask(__name__)
 CORS(app)
@@ -33,6 +33,18 @@ def serialize_doc(doc):
         return [serialize_doc(item) for item in doc]
     else:
         return doc
+
+def check_role(user_data):
+    user_email = user_data['sub']['email']
+    user_docs = db.collection('users').where('email', '==', user_email).limit(1).get()
+
+    if len(user_docs) == 0:
+        return "none"
+
+    user_doc = user_docs[0]
+    user_role = user_doc.to_dict().get('role', 'none')
+
+    return user_role
 
 def decode_id_token(id_token):
     url = f"https://www.googleapis.com/oauth2/v3/tokeninfo?id_token={id_token}"
@@ -91,14 +103,19 @@ def custom_google_login():
 @jwt_required_custom
 def create_document(user_data):
     collection_name = request.json['collection']
+    user_role = check_role(user_data)
 
     if collection_name in ['forms', 'notes', 'projects']:
-        if user_data["sub"]["email"] != "gdscnccu@gmail.com":
+        if user_role != "admin":
             return jsonify({"message": "權限不足"}), 400
 
     data = request.json['data']
 
     if collection_name == "users":
+        if user_role != "admin":
+            data.pop('paid', None)
+            data.pop('payment', None)
+            data['role'] = "insider"
         data['email'] = user_data["sub"]["email"]
         data['picture'] = user_data["sub"]["picture"]
 
@@ -118,7 +135,8 @@ def create_document(user_data):
 @app.route('/assign_member_to_project', methods=['POST'])
 @jwt_required_custom
 def assign_member_to_project(user_data):
-    if user_data["sub"]["email"] != "gdscnccu@gmail.com":
+    user_role = check_role(user_data)
+    if user_role != "admin":
         return jsonify({"message": "權限不足"}), 400
 
     user_email = request.json['user_email']
@@ -145,7 +163,8 @@ def assign_member_to_project(user_data):
 @app.route('/assign_pm', methods=['POST'])
 @jwt_required_custom
 def assign_project_manager(user_data):
-    if user_data["sub"]["email"] != "gdscnccu@gmail.com":
+    user_role = check_role(user_data)
+    if user_role != "admin":
         return jsonify({"message": "權限不足"}), 400
 
     user_email = request.json['user_email']
@@ -174,9 +193,10 @@ def assign_project_manager(user_data):
 def read_documents(user_data):
     collection_name = request.args.get('collection')
     documents = db.collection(collection_name).stream()
+    user_role = check_role(user_data)
 
     if collection_name == 'users':
-        if user_data["sub"]["email"] != "gdscnccu@gmail.com":
+        if user_role != "admin":
             return jsonify({"message": "權限不足"}), 400
 
     result = []
@@ -248,8 +268,8 @@ def read_project(user_data, name):
 @app.route('/read_member/<email>', methods=['GET'])
 @jwt_required_custom
 def read_member(user_data, email):
-    print(user_data["sub"]["email"])
-    if user_data["sub"]["email"] != email:
+    user_role = check_role(user_data)
+    if user_data["sub"]["email"] != email and user_role != "admin":
         return jsonify({"message": "權限不足"}), 400
 
     document = db.collection('users').where('email', '==', email).stream()
@@ -279,7 +299,8 @@ def read_member(user_data, email):
 @app.route('/update_project/<project_name>', methods=['PUT'])
 @jwt_required_custom
 def update_project(user_data, project_name):
-    if user_data["sub"]["email"] != "gdscnccu@gmail.com":
+    user_role = check_role(user_data)
+    if user_role != "admin":
         return jsonify({"message": "權限不足"}), 400
 
     data = request.json
@@ -301,10 +322,17 @@ def update_project(user_data, project_name):
 @app.route('/update_member/<email>', methods=['PUT'])
 @jwt_required_custom
 def update_member(user_data, email):
-    if user_data["sub"]["email"] != email:
+    user_role = check_role(user_data)
+    if user_data["sub"]["email"] != email and user_role != "admin":
         return jsonify({"message": "權限不足"}), 400
 
     data = request.json
+
+    if user_role != "admin":
+        data.pop('paid', None)
+        data.pop('payment', None)
+        data.pop('role', None)
+
     user_ref = db.collection('users').where('email', '==', email).limit(1).stream()
 
     user_doc = next(user_ref, None)
@@ -323,7 +351,8 @@ def update_member(user_data, email):
 @app.route('/update_note/<note_name>', methods=['PUT'])
 @jwt_required_custom
 def update_note(user_data, note_name):
-    if user_data["sub"]["email"] != "gdscnccu@gmail.com":
+    user_role = check_role(user_data)
+    if user_role != "admin":
         return jsonify({"message": "權限不足"}), 400
 
     data = request.json
@@ -345,7 +374,8 @@ def update_note(user_data, note_name):
 @app.route('/update_form/<form_name>', methods=['PUT'])
 @jwt_required_custom
 def update_form(user_data, form_name):
-    if user_data["sub"]["email"] != "gdscnccu@gmail.com":
+    user_role = check_role(user_data)
+    if user_role != "admin":
         return jsonify({"message": "權限不足"}), 400
 
     data = request.json
@@ -367,7 +397,8 @@ def update_form(user_data, form_name):
 @app.route('/delete_form/<form_name>', methods=['DELETE'])
 @jwt_required_custom
 def delete_form(user_data, form_name):
-    if user_data["sub"]["email"] != "gdscnccu@gmail.com":
+    user_role = check_role(user_data)
+    if user_role != "admin":
         return jsonify({"message": "權限不足"}), 400
 
     form_ref = db.collection('forms').where('name', '==', form_name).limit(1).stream()
@@ -381,7 +412,8 @@ def delete_form(user_data, form_name):
 @app.route('/delete_note/<note_name>', methods=['DELETE'])
 @jwt_required_custom
 def delete_note(user_data, note_name):
-    if user_data["sub"]["email"] != "gdscnccu@gmail.com":
+    user_role = check_role(user_data)
+    if user_role != "admin":
         return jsonify({"message": "權限不足"}), 400
 
     note_ref = db.collection('notes').where('name', '==', note_name).limit(1).stream()
@@ -395,7 +427,8 @@ def delete_note(user_data, note_name):
 @app.route('/delete_project/<project_name>', methods=['DELETE'])
 @jwt_required_custom
 def delete_project(user_data, project_name):
-    if user_data["sub"]["email"] != "gdscnccu@gmail.com":
+    user_role = check_role(user_data)
+    if user_role != "admin":
         return jsonify({"message": "權限不足"}), 400
 
     project_ref = db.collection('projects').where('name', '==', project_name).limit(1).stream()
@@ -409,7 +442,8 @@ def delete_project(user_data, project_name):
 @app.route('/delete_member/<member_email>', methods=['DELETE'])
 @jwt_required_custom
 def delete_member(user_data, member_email):
-    if user_data["sub"]["email"] != member_email:
+    user_role = check_role(user_data)
+    if user_data["sub"]["email"] != member_email and user_role != "admin":
         return jsonify({"message": "權限不足"}), 400
 
     member_ref = db.collection('users').where('email', '==', member_email).limit(1).stream()
